@@ -1,0 +1,38 @@
+{
+  "configurations" : [
+    {
+      "id" : "34617FF1-3FE3-4B59-A17F-BC14BE6AF266",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Lucent.xcodeproj",
+      "identifier" : "6785665F2FCEEE6A00300966",
+      "name" : "Lucent"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Lucent.xcodeproj",
+        "identifier" : "678566712FCEEE6B00300966",
+        "name" : "LucentTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Lucent.xcodeproj",
+        "identifier" : "6785667B2FCEEE6B00300966",
+        "name" : "LucentUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

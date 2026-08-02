@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the LucentHelper privileged daemon (Phase 5 Step 3b).
+
+  SCAFFOLD — assign as CODE_SIGN_ENTITLEMENTS on the helper target in Xcode.
+
+  The daemon is NOT sandboxed (like the app — charter mandates no App Sandbox
+  so scanning/deletion isn't crippled). It must run under the Hardened Runtime
+  (Phase 6) and be signed with the SAME Developer ID Team as the app so the
+  two verify each other. Keep the entitlement surface minimal: a deletion
+  daemon needs no network, no special device access.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+</dict>
+</plist>

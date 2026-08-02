@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd plist for the LucentHelper privileged daemon (Phase 5 Step 3b).
+
+  SCAFFOLD — goes into the app bundle at
+  Contents/Library/LaunchDaemons/it.fenix.lucent.LucentHelper.plist and is
+  registered via SMAppService.daemon(plistName: "it.fenix.lucent.LucentHelper.plist").
+
+  - Label / BundleProgram / MachServices name must all agree with
+    PrivilegedDeletionClient.machServiceName and Helper/main.swift.
+  - BundleProgram is the helper executable's path INSIDE the app bundle
+    (relative to Contents/), so adjust if the helper target's product name
+    differs.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>it.fenix.lucent.LucentHelper</string>
+
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/LucentHelper</string>
+
+    <key>MachServices</key>
+    <dict>
+        <key>it.fenix.lucent.LucentHelper</key>
+        <true/>
+    </dict>
+
+    <!-- The daemon is started on demand when the app connects to the Mach
+         service; launchd keeps it alive only while needed. -->
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>it.fenix.lucent.Lucent</string>
+    </array>
+</dict>
+</plist>
