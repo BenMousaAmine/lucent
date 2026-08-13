@@ -11,11 +11,13 @@ import Foundation
 
 private struct FakePackageManagerEnvironment: PackageManagerEnvironment {
     var sizes: [URL: Int64] = [:]
-    var nodeModules: [PMDirEntry] = []
+    var dependencyDirs: [String: [PMDirEntry]] = [:]
 
     func size(of dir: URL) -> Int64? { sizes[dir] }
 
-    func findNodeModules(under root: URL, maxDepth: Int) -> [PMDirEntry] { nodeModules }
+    func findDependencyDirs(marker: DependencyMarker, under root: URL, maxDepth: Int) -> [PMDirEntry] {
+        dependencyDirs[marker.kind] ?? []
+    }
 }
 
 private enum Fixtures {
@@ -28,9 +30,11 @@ private enum Fixtures {
                 home.appendingPathComponent("Library/pnpm/store"): 2_800_000_000,
                 home.appendingPathComponent("Library/Caches/pip"): 507_000_000,
             ],
-            nodeModules: [
-                PMDirEntry(url: home.appendingPathComponent("Projects/Artemis/node_modules"), physicalSize: 300_000_000),
-                PMDirEntry(url: home.appendingPathComponent("Projects/guitar-hub/node_modules"), physicalSize: 150_000_000),
+            dependencyDirs: [
+                "nodeModules": [
+                    PMDirEntry(url: home.appendingPathComponent("Projects/Artemis/node_modules"), physicalSize: 300_000_000),
+                    PMDirEntry(url: home.appendingPathComponent("Projects/guitar-hub/node_modules"), physicalSize: 150_000_000),
+                ],
             ]
         )
     }
@@ -69,7 +73,7 @@ struct PackageManagerProbeTests {
 
     @Test("Omits categories with nothing found")
     func omitsEmpty() async throws {
-        let empty = FakePackageManagerEnvironment(sizes: [:], nodeModules: [])
+        let empty = FakePackageManagerEnvironment(sizes: [:], dependencyDirs: [:])
         let probe = PackageManagerProbe(env: empty, home: Fixtures.home)
         let findings = try await probe.scan()
         #expect(findings.isEmpty)

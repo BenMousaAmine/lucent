@@ -12,10 +12,18 @@ struct PMDirEntry: Equatable {
     let physicalSize: Int64
 }
 
+struct DependencyMarker: Equatable {
+    let kind: String
+    let ecosystem: String
+    let dirName: String
+    let siblingManifests: [String]
+    let regenerateCommand: String
+}
+
 protocol PackageManagerEnvironment: Sendable {
     func size(of dir: URL) -> Int64?
 
-    func findNodeModules(under root: URL, maxDepth: Int) -> [PMDirEntry]
+    func findDependencyDirs(marker: DependencyMarker, under root: URL, maxDepth: Int) -> [PMDirEntry]
 }
 
 struct RealPackageManagerEnvironment: PackageManagerEnvironment {
@@ -44,7 +52,14 @@ struct RealPackageManagerEnvironment: PackageManagerEnvironment {
         ".Trash", ".cache", "Public",
     ]
 
-    func findNodeModules(under root: URL, maxDepth: Int) -> [PMDirEntry] {
+    private func hasSiblingManifest(_ url: URL, _ manifests: [String]) -> Bool {
+        guard !manifests.isEmpty else { return true }
+        let fm = FileManager.default
+        let parent = url.deletingLastPathComponent()
+        return manifests.contains { fm.fileExists(atPath: parent.appendingPathComponent($0).path) }
+    }
+
+    func findDependencyDirs(marker: DependencyMarker, under root: URL, maxDepth: Int) -> [PMDirEntry] {
         let fm = FileManager.default
         let rootDepth = root.pathComponents.count
         var results: [PMDirEntry] = []
@@ -65,10 +80,14 @@ struct RealPackageManagerEnvironment: PackageManagerEnvironment {
                 let components = url.pathComponents
                 let depth = components.count - rootDepth
                 if depth > maxDepth { enumerator.skipDescendants(); continue }
-                guard components.last == "node_modules" else { continue }
+                guard components.last == marker.dirName else { continue }
                 let parents = components.dropLast()
-                if parents.contains("node_modules") { enumerator.skipDescendants(); continue }
+                if parents.contains(marker.dirName) { enumerator.skipDescendants(); continue }
                 if !Self.excludedComponents.isDisjoint(with: Set(parents)) {
+                    enumerator.skipDescendants()
+                    continue
+                }
+                guard hasSiblingManifest(url, marker.siblingManifests) else {
                     enumerator.skipDescendants()
                     continue
                 }
