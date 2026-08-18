@@ -8,7 +8,10 @@
 import Foundation
 
 enum FindingLabels {
-    private static let perElementKinds: Set<String> = ["danglingImage", "stoppedContainer", "volume"]
+    private static let perElementKinds: Set<String> = [
+        "danglingImage", "stoppedContainer", "volume",
+        "nodeModules", "rustTarget", "phpVendor", "cocoaPods", "carthage", "pythonVenv", "pythonVenvEnv",
+    ]
 
     static func title(_ finding: Finding) -> String {
         if perElementKinds.contains(finding.kind), let owner = finding.owner {
@@ -32,6 +35,11 @@ enum FindingLabels {
         case "pipCache": return String(localized: "pip cache")
         case "yarnCache": return String(localized: "Yarn cache")
         case "nodeModules": return "node_modules"
+        case "rustTarget": return String(localized: "Rust build output")
+        case "phpVendor": return String(localized: "Composer vendor")
+        case "cocoaPods": return "Pods"
+        case "carthage": return "Carthage"
+        case "pythonVenv", "pythonVenvEnv": return String(localized: "Python virtualenv")
         case "orphanContainer": return String(localized: "Uninstalled app")
         case "thirdPartyCaches": return String(localized: "Third-party app caches")
         default: return finding.kind

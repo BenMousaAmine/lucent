@@ -50,6 +50,9 @@ struct ProductResultsView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 560)
+        .onAppear {
+            if scanModel.phase == .intro { scanModel.start() }
+        }
         .onChange(of: selectedItem) { _, _ in
             selectedCategory = nil
             selectedFinding = nil
@@ -105,33 +108,34 @@ private struct CategorySummaryRow: View {
 }
 
 private struct CategoryDetailColumn: View {
-    @Environment(LucentSettings.self) private var settings
     let category: FindingCategory
     @Binding var selectedFinding: Finding?
 
+    /// Fixed so the list never resizes when a selection appears: the detail
+    /// panel below always fills the remaining height, empty or not.
+    private let listHeight: CGFloat = 260
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(FindingLabels.kindLabel(category.findings.first!))
-                .font(.title2.bold())
-                .padding(settings.density.panelPadding)
-
-            Divider()
-
+        VStack(spacing: 0) {
             List(category.findings, id: \.id, selection: $selectedFinding) { finding in
                 FindingElementRow(finding: finding).tag(finding)
             }
             .scrollContentBackground(.hidden)
-            .frame(minHeight: 160, maxHeight: 260)
+            .frame(height: listHeight)
 
             Divider()
 
-            if let selectedFinding {
-                FindingDetailPanel(finding: selectedFinding)
-            } else {
-                ContentUnavailableView("No selection", systemImage: "doc.text.magnifyingglass",
-                                       description: Text("Select an item to see its details."))
+            Group {
+                if let selectedFinding {
+                    FindingDetailPanel(finding: selectedFinding)
+                } else {
+                    ContentUnavailableView("No selection", systemImage: "doc.text.magnifyingglass",
+                                           description: Text("Select an item to see its details."))
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .navigationTitle(FindingLabels.kindLabel(category.findings.first!))
         .onChange(of: category) { _, _ in selectedFinding = nil }
     }
 }

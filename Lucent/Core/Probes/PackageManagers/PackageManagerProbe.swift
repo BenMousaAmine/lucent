@@ -19,17 +19,23 @@ struct PackageManagerProbe: DomainProbe {
     private let home: URL
     private let searchDepth: Int
     private let manifest: RuleManifest
+    private let staleAfter: TimeInterval
+    private let now: @Sendable () -> Date
 
     init(
         env: PackageManagerEnvironment = RealPackageManagerEnvironment(),
         home: URL = RealPackageManagerEnvironment.home,
         searchDepth: Int = 6,
-        manifest: RuleManifest = .default
+        manifest: RuleManifest = .default,
+        staleAfter: TimeInterval = 90 * 24 * 60 * 60,
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.env = env
         self.home = home
         self.searchDepth = searchDepth
         self.manifest = manifest
+        self.staleAfter = staleAfter
+        self.now = now
     }
 
     private static let caches: [PackageManagerCache] = [
@@ -86,7 +92,7 @@ struct PackageManagerProbe: DomainProbe {
             if let f = cacheFinding(cache) { findings.append(f) }
         }
         for marker in Self.markers {
-            if let f = dependencyFinding(marker) { findings.append(f) }
+            findings.append(contentsOf: dependencyFindings(marker))
         }
         return findings
     }
@@ -105,21 +111,32 @@ struct PackageManagerProbe: DomainProbe {
                            state: .stale, explanation: explanation, comesBack: true)
     }
 
-    private func dependencyFinding(_ marker: DependencyMarker) -> Finding? {
+    private func dependencyFindings(_ marker: DependencyMarker) -> [Finding] {
         let entries = env.findDependencyDirs(marker: marker, under: home, maxDepth: searchDepth)
-        let total = entries.reduce(0) { $0 + $1.physicalSize }
-        guard total > 0 else { return nil }
-        let projectList = entries
+        return entries
+            .filter { $0.physicalSize > 0 }
             .sorted { $0.physicalSize > $1.physicalSize }
-            .prefix(5)
-            .map { "\($0.url.deletingLastPathComponent().lastPathComponent) (\(ByteCountFormatter.string(fromByteCount: $0.physicalSize, countStyle: .file)))" }
-            .joined(separator: ", ")
+            .map { dependencyFinding(marker, entry: $0) }
+    }
+
+    private func dependencyFinding(_ marker: DependencyMarker, entry: PMDirEntry) -> Finding {
+        let project = entry.url.deletingLastPathComponent()
+        let shortPath = project.path.replacingOccurrences(of: home.path, with: "~")
+        let isStale = entry.lastModified.map { now().timeIntervalSince($0) > staleAfter } ?? true
+        let activity: String
+        if let modified = entry.lastModified {
+            let days = Int(now().timeIntervalSince(modified) / (24 * 60 * 60))
+            activity = String(localized: "Last touched \(days) days ago.")
+        } else {
+            activity = String(localized: "Last use unknown.")
+        }
         let explanation = String(
-            localized: "\(entries.count) \(marker.dirName) folders found under home (max depth \(searchDepth)). The largest: \(projectList). They're regenerable with \"\(marker.regenerateCommand)\", but the first build after deletion needs to re-download all dependencies — make sure you won't need them soon before deleting."
+            localized: "\(marker.dirName) of the project \"\(project.lastPathComponent)\" (\(shortPath)). \(activity) It's regenerable with \"\(marker.regenerateCommand)\", but the first build after deletion needs to re-download all dependencies."
         )
-        return makeFinding(kind: marker.kind, owner: marker.ecosystem, nodes: entries.map { node($0.url, $0.physicalSize) },
+        return makeFinding(kind: marker.kind, owner: project.lastPathComponent,
+                           nodes: [node(entry.url, entry.physicalSize)],
                            risk: .conditional, reversibility: .regenerable,
-                           state: .stale, explanation: explanation, comesBack: true)
+                           state: isStale ? .stale : .live, explanation: explanation, comesBack: true)
     }
 
     // MARK: - Helpers

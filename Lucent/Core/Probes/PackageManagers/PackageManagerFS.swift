@@ -10,6 +10,13 @@ import Foundation
 struct PMDirEntry: Equatable {
     let url: URL
     let physicalSize: Int64
+    let lastModified: Date?
+
+    init(url: URL, physicalSize: Int64, lastModified: Date? = nil) {
+        self.url = url
+        self.physicalSize = physicalSize
+        self.lastModified = lastModified
+    }
 }
 
 struct DependencyMarker: Equatable {
@@ -59,6 +66,17 @@ struct RealPackageManagerEnvironment: PackageManagerEnvironment {
         return manifests.contains { fm.fileExists(atPath: parent.appendingPathComponent($0).path) }
     }
 
+    /// Most recent activity of the project owning `dependencyDir`: the newest mtime
+    /// between the project folder and the dependency dir itself.
+    private func projectModified(_ dependencyDir: URL) -> Date? {
+        let fm = FileManager.default
+        let project = dependencyDir.deletingLastPathComponent()
+        let dates = [project, dependencyDir].compactMap {
+            (try? fm.attributesOfItem(atPath: $0.path))?[.modificationDate] as? Date
+        }
+        return dates.max()
+    }
+
     func findDependencyDirs(marker: DependencyMarker, under root: URL, maxDepth: Int) -> [PMDirEntry] {
         let fm = FileManager.default
         let rootDepth = root.pathComponents.count
@@ -92,7 +110,7 @@ struct RealPackageManagerEnvironment: PackageManagerEnvironment {
                     continue
                 }
                 let total = size(of: url) ?? 0
-                results.append(PMDirEntry(url: url, physicalSize: total))
+                results.append(PMDirEntry(url: url, physicalSize: total, lastModified: projectModified(url)))
                 enumerator.skipDescendants()
             }
         }
