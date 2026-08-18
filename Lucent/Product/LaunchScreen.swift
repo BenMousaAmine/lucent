@@ -21,7 +21,6 @@ struct LaunchScreen: View {
         }
         .onAppear {
             scanModel.scan()
-            wholeDiskModel.start()
         }
     }
 
