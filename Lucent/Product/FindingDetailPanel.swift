@@ -68,13 +68,20 @@ struct FindingDetailPanel: View {
             Divider()
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text(result.succeeded.first?.strategy == .quarantine
-                     ? String(localized: "Moved to quarantine")
-                     : String(localized: "Moved to Trash"))
-                    .font(.callout)
+                Text(doneText(finding, result)).font(.callout)
                 Spacer()
-                Button(String(localized: "Undo")) { deletion.undo(finding) }
+                if deletion.canUndo(finding) {
+                    Button(String(localized: "Undo")) { deletion.undo(finding) }
+                }
             }
+            .padding(settings.density.panelPadding)
+        } else if deletion.isWorking(finding) {
+            Divider()
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Working… this can take a minute.").font(.callout)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(settings.density.panelPadding)
         } else if deletion.canDelete(finding) {
             Divider()
@@ -99,17 +106,71 @@ struct FindingDetailPanel: View {
         }
     }
 
+    private func doneText(_ finding: Finding, _ result: DeletionResult) -> String {
+        if finding.dockerResource == .reclaimSpace {
+            return String(localized: "Docker's disk was compacted")
+        }
+        if finding.dockerResource != nil {
+            return String(localized: "Removed from Docker")
+        }
+        if finding.simulatorResource != nil {
+            return String(localized: "Removed from Xcode")
+        }
+        return result.succeeded.first?.strategy == .quarantine
+            ? String(localized: "Moved to quarantine")
+            : String(localized: "Moved to Trash")
+    }
+
     private func actionTitle(_ finding: Finding) -> String {
-        finding.reversibility == .trash
-            ? String(localized: "Move to Trash")
-            : String(localized: "Move to quarantine")
+        if finding.dockerResource == .reclaimSpace {
+            return String(localized: "Compact Docker's disk")
+        }
+        if finding.dockerResource != nil {
+            return String(localized: "Remove from Docker")
+        }
+        if finding.simulatorResource != nil {
+            return String(localized: "Remove from Xcode")
+        }
+        return String(localized: "Move to Trash")
     }
 
     private func confirmationMessage(_ finding: Finding) -> String {
         let reclaim = FindingLabels.reclaimText(finding.reclaimable)
-        return finding.reversibility == .trash
-            ? String(localized: "It goes to the Trash and is recoverable. Frees \(reclaim).")
-            : String(localized: "It is moved to quarantine and can be restored. Frees \(reclaim).")
+        if let resource = finding.dockerResource {
+            return Self.dockerWarning(resource, name: finding.owner ?? "", reclaim: reclaim)
+        }
+        if let resource = finding.simulatorResource {
+            return Self.simulatorWarning(resource, name: finding.owner ?? "", reclaim: reclaim)
+        }
+        return finding.reversibility == .permanent
+            ? String(localized: "It goes to the Trash. It won't be recreated: once you empty the Trash it's gone for good. Frees \(reclaim).")
+            : String(localized: "It goes to the Trash and is recoverable. Frees \(reclaim).")
+    }
+
+    /// Docker removals bypass the Trash entirely, so each message names the
+    /// resource and states plainly that there is no way back.
+    private static func dockerWarning(_ resource: DockerResource, name: String, reclaim: String) -> String {
+        switch resource {
+        case .image:
+            return String(localized: "Permanently removes the image \"\(name)\" from Docker. There is no undo — you'd have to pull or build it again. Frees \(reclaim): Docker Desktop returns the space to macOS on its own when images are deleted.")
+        case .container:
+            return String(localized: "Permanently removes the container \"\(name)\" and its writable layer from Docker. There is no undo. Frees \(reclaim) inside Docker's VM; the space returns to macOS only after you compact Docker's disk.")
+        case .volume:
+            return String(localized: "WARNING: permanently removes the volume \"\(name)\" and everything stored in it — if it holds a database or other persistent data, that data is gone for good. There is no undo. Frees \(reclaim) inside Docker's VM; the space returns to macOS only after you compact Docker's disk.")
+        case .reclaimSpace:
+            return String(localized: "Runs Docker's own tool to give back to macOS the space already freed inside Docker. Nothing is deleted. Docker must be running, and the first time it downloads a small helper image. It can take a minute.")
+        case .buildCache:
+            return String(localized: "Permanently removes Docker's entire build cache. There is no undo, and later builds will be slower until it rebuilds. Frees \(reclaim) inside Docker's VM; the space returns to macOS only after you compact Docker's disk.")
+        }
+    }
+
+    private static func simulatorWarning(_ resource: SimulatorResource, name: String, reclaim: String) -> String {
+        switch resource {
+        case .runtime:
+            return String(localized: "Permanently removes \(name) from Xcode. There is no undo — you'd have to download it again from Xcode → Settings → Components. Frees \(reclaim).")
+        case .unavailableDevices:
+            return String(localized: "Permanently removes the simulators that can no longer start, with the apps and data inside them. There is no undo. Frees \(reclaim).")
+        }
     }
 
     private func row(_ label: LocalizedStringKey, _ value: String) -> some View {

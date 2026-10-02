@@ -5,15 +5,35 @@
 //  Created by Amine ben moussa on 21/07/26.
 //
 
+import AppKit
 import Foundation
 
 struct CacheEntry: Equatable {
     let name: String
     let physicalSize: Int64
+    let url: URL
+
+    init(name: String, physicalSize: Int64, url: URL? = nil) {
+        self.name = name
+        self.physicalSize = physicalSize
+        self.url = url ?? RealSystemCacheEnvironment.home
+            .appendingPathComponent("Library/Caches/\(name)")
+    }
+}
+
+struct RunningApp: Equatable {
+    let bundleIdentifier: String
+    let name: String
 }
 
 protocol SystemCacheEnvironment: Sendable {
     func cacheEntries() -> [CacheEntry]
+
+    func runningApps() -> [RunningApp]
+}
+
+extension SystemCacheEnvironment {
+    func runningApps() -> [RunningApp] { [] }
 }
 
 struct RealSystemCacheEnvironment: SystemCacheEnvironment {
@@ -27,7 +47,13 @@ struct RealSystemCacheEnvironment: SystemCacheEnvironment {
             let url = root.appendingPathComponent(name)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return nil }
-            return CacheEntry(name: name, physicalSize: physicalSize(of: url))
+            return CacheEntry(name: name, physicalSize: physicalSize(of: url), url: url)
+        }
+    }
+
+    func runningApps() -> [RunningApp] {
+        NSWorkspace.shared.runningApplications.compactMap { app in
+            app.bundleIdentifier.map { RunningApp(bundleIdentifier: $0, name: app.localizedName ?? "") }
         }
     }
 

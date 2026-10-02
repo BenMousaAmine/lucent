@@ -45,6 +45,38 @@ struct DeletionExecutorTests {
         #expect(logged.first?.currentPath == moved.path)
     }
 
+    @Test("Same-named items don't collide in quarantine")
+    func quarantineDisambiguatesNames() throws {
+        let volume = try DisposableAPFSVolume()
+        defer { volume.destroy() }
+
+        let fm = FileManager.default
+        let quarantine = volume.mountPoint.appendingPathComponent("Quarantine", isDirectory: true)
+        let log = UndoLog(url: volume.mountPoint.appendingPathComponent("undo.jsonl"))
+        let executor = DeletionExecutor(quarantineDir: quarantine, undoLog: log)
+
+        // Two projects, each with its own node_modules — the same last path component.
+        var sources: [URL] = []
+        for project in ["project-a", "project-b"] {
+            let dir = volume.mountPoint.appendingPathComponent(project, isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let nodeModules = dir.appendingPathComponent("node_modules", isDirectory: true)
+            try fm.createDirectory(at: nodeModules, withIntermediateDirectories: true)
+            try makeFile(nodeModules.appendingPathComponent("pkg.bin"), bytes: 512)
+            sources.append(nodeModules)
+        }
+
+        let result = executor.execute(
+            DeletionPlan(removals: sources.map { removal($0, .quarantine, size: 512) })
+        )
+
+        #expect(result.isCompleteSuccess)
+        #expect(sources.allSatisfy { !fm.fileExists(atPath: $0.path) })
+        #expect(fm.fileExists(atPath: quarantine.appendingPathComponent("node_modules").path))
+        #expect(fm.fileExists(atPath: quarantine.appendingPathComponent("node_modules (2)").path))
+        #expect(Set(try log.readAll().map(\.currentPath)).count == 2)
+    }
+
     @Test("Partial failure: missing path fails, the valid one still succeeds")
     func partialFailureContinues() throws {
         let volume = try DisposableAPFSVolume()

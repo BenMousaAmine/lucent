@@ -11,16 +11,25 @@ struct DockerProbe: DomainProbe {
     let domain: Domain = .docker
     private let runner: DockerCommandRunner
     private let manifest: RuleManifest
+    private let diskImageBytes: Int64?
 
     init(runner: DockerCommandRunner = DockerCommandLineRunner(),
-         manifest: RuleManifest = .default) {
+         manifest: RuleManifest = .default,
+         diskImageBytes: Int64? = nil) {
         self.runner = runner
         self.manifest = manifest
+        self.diskImageBytes = diskImageBytes
     }
 
     private func tier(_ kind: String, _ risk: RiskTier, _ rev: Reversibility)
         -> (risk: RiskTier, reversibility: Reversibility) {
         manifest.resolved(domain: .docker, kind: kind, fallbackRisk: risk, fallbackReversibility: rev)
+    }
+
+    static func diskImageSize() -> Int64? {
+        let raw = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw")
+        return try? PathMeasurer().measure(raw).physicalSize
     }
 
     func isAvailable() async -> Bool {
@@ -39,7 +48,24 @@ struct DockerProbe: DomainProbe {
         if let f = buildCacheFinding(df: df) { findings.append(f) }
         findings += containerFindings(containers: containers)
         findings += volumeFindings(volumeNames: volumeNames, usage: volumeUsage)
+        if let f = compactionFinding() { findings.append(f) }
         return findings
+    }
+
+    private func compactionFinding() -> Finding? {
+        guard let diskImageBytes, diskImageBytes > 0 else { return nil }
+        let size = ByteCountFormatter.string(fromByteCount: diskImageBytes, countStyle: .file)
+        let explanation = String(
+            localized: "Docker keeps everything in one virtual disk (Docker.raw), which now takes \(size) on your Mac. Space freed inside Docker by removing containers, volumes or build cache isn't always given back to macOS. This runs Docker's own tool (docker/desktop-reclaim-space) to return it. Nothing is deleted. How much comes back can't be known in advance."
+        )
+        let t = tier("dockerDiskCompaction", .safe, .regenerable)
+        return Finding(
+            id: UUID(), domain: .docker, kind: "dockerDiskCompaction", nodes: [],
+            reclaimable: .zero(reason: String(localized: "unknown until compacted")), owner: "Docker.raw",
+            state: .unknown, risk: t.risk, reversibility: t.reversibility,
+            explanation: explanation, comesBack: nil,
+            dockerResource: .reclaimSpace
+        )
     }
 
     // MARK: - Per-element Findings (one per image/container/volume, per user request 2026-07-21:
@@ -50,14 +76,15 @@ struct DockerProbe: DomainProbe {
             .compactMap { image in
                 guard let bytes = DockerByteSize.bytes(from: image.Size), bytes > 0 else { return nil }
                 let explanation = String(
-                    localized: "Image \"\(image.displayName)\" (ID \(image.ID)), not used by any container. Removing it frees space INSIDE Docker's VM, but it isn't returned to macOS until you compact Docker's disk (Docker.raw doesn't shrink on its own). Regenerable: if you still need it, a new pull or build recreates it."
+                    localized: "Image \"\(image.displayName)\" (ID \(image.ID)), not used by any container. Removing it returns its space to macOS: Docker Desktop shrinks its disk (Docker.raw) on its own when images are deleted. Regenerable: if you still need it, a new pull or build recreates it."
                 )
                 let t = tier("danglingImage", .safe, .regenerable)
                 return Finding(
                     id: UUID(), domain: .docker, kind: "danglingImage", nodes: [],
-                    reclaimable: .freedInContainerOnly(bytes), owner: image.displayName,
+                    reclaimable: .returnedToOS(bytes), owner: image.displayName,
                     state: .stale, risk: t.risk, reversibility: t.reversibility,
-                    explanation: explanation, comesBack: true
+                    explanation: explanation, comesBack: true,
+                    dockerResource: .image(id: image.ID)
                 )
             }
     }
@@ -74,7 +101,8 @@ struct DockerProbe: DomainProbe {
             id: UUID(), domain: .docker, kind: "buildCache", nodes: [],
             reclaimable: .freedInContainerOnly(reclaim), owner: "Docker daemon",
             state: .stale, risk: t.risk, reversibility: t.reversibility,
-            explanation: explanation, comesBack: true
+            explanation: explanation, comesBack: true,
+            dockerResource: .buildCache
         )
     }
 
@@ -91,7 +119,8 @@ struct DockerProbe: DomainProbe {
                     id: UUID(), domain: .docker, kind: "stoppedContainer", nodes: [],
                     reclaimable: .freedInContainerOnly(bytes), owner: container.Names,
                     state: .stale, risk: t.risk, reversibility: t.reversibility,
-                    explanation: explanation, comesBack: false
+                    explanation: explanation, comesBack: false,
+                    dockerResource: .container(id: container.ID)
                 )
             }
     }
@@ -112,7 +141,8 @@ struct DockerProbe: DomainProbe {
                 id: UUID(), domain: .docker, kind: "volume", nodes: [],
                 reclaimable: .freedInContainerOnly(bytes), owner: vol.name,
                 state: .unknown, risk: t.risk, reversibility: t.reversibility,
-                explanation: explanation, comesBack: false
+                explanation: explanation, comesBack: false,
+                dockerResource: .volume(name: vol.name)
             )
         }
     }

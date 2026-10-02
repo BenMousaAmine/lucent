@@ -9,6 +9,9 @@ import SwiftUI
 
 struct WholeDiskColumn: View {
     let model: ScanViewModel
+    @Environment(DeletionController.self) private var deletion
+    @State private var pendingTrash: ChildTotal?
+    @State private var trashError: String?
 
     var body: some View {
         switch model.phase {
@@ -52,8 +55,18 @@ struct WholeDiskColumn: View {
                     .lineLimit(1).truncationMode(.head)
                 Spacer()
                 Text(summaryText).font(.caption).foregroundStyle(.secondary)
+                Button { model.rescan() } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless)
+                    .help("Rescan")
             }
             .padding(.horizontal).padding(.top).padding(.bottom, 6)
+
+            if let trashError {
+                Label(trashError, systemImage: "xmark.octagon")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal).padding(.bottom, 6)
+            }
 
             if model.skippedPaths > 100 {
                 Label("Many paths skipped due to permissions. Enable Full Disk Access in Settings → Privacy.",
@@ -79,8 +92,22 @@ struct WholeDiskColumn: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { model.enter(child) }
+                .contextMenu {
+                    if let url = model.url(for: child), deletion.canTrash(url) {
+                        Button("Move to Trash…", role: .destructive) { pendingTrash = child }
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
+            .confirmationDialog("Move to Trash?", isPresented: Binding(
+                get: { pendingTrash != nil },
+                set: { if !$0 { pendingTrash = nil } }
+            ), titleVisibility: .visible, presenting: pendingTrash) { child in
+                Button("Move to Trash", role: .destructive) { trash(child) }
+                Button("Cancel", role: .cancel) {}
+            } message: { child in
+                Text("\(child.name) (\(ByteCountFormatter.string(fromByteCount: child.physicalTotal, countStyle: .file))) will be moved to the Trash. Lucent doesn't know what it's used for, so check before confirming. The space returns to macOS when you empty the Trash.")
+            }
         }
         .navigationTitle("Whole disk")
     }
@@ -88,7 +115,20 @@ struct WholeDiskColumn: View {
     private var summaryText: String {
         var s = "\(model.bytesText) · \(model.filesSeen) \(String(localized: "files"))"
         if model.skippedPaths > 0 { s += " · \(model.skippedPaths) \(String(localized: "skipped"))" }
+        if let scannedAt = model.scannedAt {
+            s += " · \(String(localized: "scanned \(scannedAt.formatted(.relative(presentation: .named)))"))"
+        }
         return s
+    }
+
+    private func trash(_ child: ChildTotal) {
+        guard let url = model.url(for: child) else { return }
+        if deletion.trash(url, physicalSize: child.physicalTotal) {
+            model.remove(child)
+            trashError = nil
+        } else {
+            trashError = deletion.lastError
+        }
     }
 
     private func stat(_ value: String, _ label: LocalizedStringKey) -> some View {

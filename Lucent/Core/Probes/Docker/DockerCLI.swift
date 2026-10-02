@@ -9,6 +9,14 @@ import Foundation
 
 protocol DockerCommandRunner: Sendable {
     func run(_ args: [String]) throws -> Data
+
+    func runLong(_ args: [String]) async throws
+}
+
+extension DockerCommandRunner {
+    func runLong(_ args: [String]) async throws {
+        _ = try run(args)
+    }
 }
 
 enum DockerCLIError: Error, Equatable {
@@ -50,5 +58,33 @@ struct DockerCommandLineRunner: DockerCommandRunner {
             )
         }
         return data
+    }
+
+    func runLong(_ args: [String]) async throws {
+        guard let path = dockerPath() else { throw DockerCLIError.dockerNotFound }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: path)
+        proc.arguments = args
+        let err = Pipe()
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = err
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            proc.terminationHandler = { _ in continuation.resume() }
+            do {
+                try proc.run()
+            } catch {
+                proc.terminationHandler = nil
+                continuation.resume(throwing: error)
+            }
+        }
+
+        guard proc.terminationStatus == 0 else {
+            throw DockerCLIError.commandFailed(
+                args: args,
+                status: proc.terminationStatus,
+                stderr: String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            )
+        }
     }
 }

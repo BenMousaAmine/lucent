@@ -24,23 +24,15 @@ struct DeletionIntent {
 
     func dryRun() -> DeletionPlan {
         let removals = findings.flatMap { finding -> [PlannedRemoval] in
-            let strategy = Self.strategy(for: finding.reversibility)
-            return finding.nodes.map { node in
+            finding.nodes.map { node in
                 PlannedRemoval(
                     path: node.path,
-                    strategy: strategy,
+                    strategy: .trash,
                     physicalSize: node.physicalSize,
                     reclaimable: finding.reclaimable
                 )
             }
         }
         return DeletionPlan(removals: removals)
-    }
-
-    private static func strategy(for reversibility: Reversibility) -> DeletionStrategy {
-        switch reversibility {
-        case .trash:                     return .trash
-        case .regenerable, .permanent:   return .quarantine
-        }
     }
 }

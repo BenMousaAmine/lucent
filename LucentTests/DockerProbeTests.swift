@@ -90,9 +90,9 @@ struct DockerProbeTests {
 
         let image = byKind["danglingImage"]!.first!
         #expect(image.owner == "old")
-        if case let .freedInContainerOnly(b) = image.reclaimable {
+        if case let .returnedToOS(b) = image.reclaimable {
             #expect(b == 94_100_000)
-        } else { Issue.record("image reclaimable must be freedInContainerOnly") }
+        } else { Issue.record("image reclaimable must be returnedToOS") }
 
         let container = byKind["stoppedContainer"]!.first!
         #expect(container.owner == "old-1")
@@ -123,6 +123,37 @@ struct DockerProbeTests {
         #expect(findings.filter { $0.kind == "buildCache" }.allSatisfy { $0.risk == .safe })
         #expect(findings.filter { $0.kind == "stoppedContainer" }.allSatisfy { $0.risk == .conditional })
         #expect(findings.filter { $0.kind == "volume" }.allSatisfy { $0.risk == .conditional })
+    }
+
+    @Test("Disk compaction is offered only when Docker's disk image was measured, and promises no bytes")
+    func compactionFinding() async throws {
+        let without = try await DockerProbe(runner: Fixtures.runner()).scan()
+        #expect(!without.contains { $0.kind == "dockerDiskCompaction" })
+
+        let with = try await DockerProbe(runner: Fixtures.runner(), diskImageBytes: 52_000_000_000).scan()
+        let compaction = try #require(with.first { $0.kind == "dockerDiskCompaction" })
+        #expect(compaction.dockerResource == .reclaimSpace)
+        #expect(compaction.reclaimable.bytes == 0)
+        #expect(compaction.isActionable)
+        #expect(compaction.risk == .safe)
+    }
+
+    @Test("Every Docker Finding carries the identifier its removal needs")
+    func carriesResourceIdentifiers() async throws {
+        let findings = try await DockerProbe(runner: Fixtures.runner()).scan()
+        let byKind = Dictionary(grouping: findings, by: { $0.kind })
+
+        // Docker findings have no filesystem nodes, so the resource is the
+        // only thing that makes them actionable.
+        #expect(findings.allSatisfy { $0.nodes.isEmpty })
+        #expect(findings.allSatisfy { $0.isActionable })
+
+        #expect(byKind["danglingImage"]?.first?.dockerResource == .image(id: "6887638afad5"))
+        #expect(byKind["stoppedContainer"]?.first?.dockerResource == .container(id: "779ec9cb87e4"))
+        #expect(byKind["buildCache"]?.first?.dockerResource == .buildCache)
+
+        let volumes = Set((byKind["volume"] ?? []).compactMap(\.dockerResource))
+        #expect(volumes == [.volume(name: "1ae27c2bdd32"), .volume(name: "mydb")])
     }
 
     @Test("Degrades gracefully when docker is absent")

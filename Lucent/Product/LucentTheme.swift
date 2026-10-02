@@ -18,6 +18,7 @@ enum LucentTheme {
         case .xcode: return Color(hex: 0x1E8FFF)
         case .system: return Color(hex: 0xBF5AF2)
         case .orphanApp: return Color(hex: 0xFF375F)
+        case .devTools: return Color(hex: 0x64D2FF)
         case .unknown: return .secondary
         }
     }

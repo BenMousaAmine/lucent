@@ -58,7 +58,7 @@ struct DeletionExecutor {
         case .quarantine:
             try fileManager.createDirectory(at: quarantineDir,
                                             withIntermediateDirectories: true)
-            let target = quarantineDir.appendingPathComponent(removal.path.lastPathComponent)
+            let target = nonClashingTarget(named: removal.path.lastPathComponent)
             try fileManager.moveItem(at: removal.path, to: target)
             destination = target
         }
@@ -69,5 +69,20 @@ struct DeletionExecutor {
             strategy: removal.strategy,
             physicalSize: removal.physicalSize
         )
+    }
+
+    /// Quarantined items keep their original name, which collides across
+    /// projects (every one of them is a "node_modules").
+    private func nonClashingTarget(named name: String) -> URL {
+        let url = quarantineDir.appendingPathComponent(name)
+        guard fileManager.fileExists(atPath: url.path) else { return url }
+
+        var n = 2
+        var candidate = quarantineDir.appendingPathComponent("\(name) (\(n))")
+        while fileManager.fileExists(atPath: candidate.path) {
+            n += 1
+            candidate = quarantineDir.appendingPathComponent("\(name) (\(n))")
+        }
+        return candidate
     }
 }

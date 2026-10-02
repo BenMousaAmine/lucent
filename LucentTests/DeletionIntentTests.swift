@@ -52,13 +52,18 @@ struct DeletionIntentTests {
                                      physical: 200, reclaimable: .returnedToOS(200))
         let regen = Make.finding(kind: "npmCache", risk: .conditional, reversibility: .regenerable,
                                  physical: 300, reclaimable: .returnedToOS(300))
+        let permanent = Make.finding(kind: "dockerImage", risk: .conditional, reversibility: .permanent,
+                                     physical: 400, reclaimable: .returnedToOS(400))
 
-        let plan = try DeletionIntent(findings: [trashable, regen]).dryRun()
+        let plan = try DeletionIntent(findings: [trashable, regen, permanent]).dryRun()
 
-        #expect(plan.removals.count == 2)
+        #expect(plan.removals.count == 3)
         let byPath = Dictionary(uniqueKeysWithValues: plan.removals.map { ($0.path.lastPathComponent, $0) })
         #expect(byPath["derivedData"]?.strategy == .trash)
-        #expect(byPath["npmCache"]?.strategy == .quarantine)
+        // Regenerable goes to the Trash too: quarantine only moves bytes aside,
+        // so it never frees the space the finding promises to reclaim.
+        #expect(byPath["npmCache"]?.strategy == .trash)
+        #expect(byPath["dockerImage"]?.strategy == .trash)
 
         #expect(!FileManager.default.fileExists(atPath: "/tmp/lucent-fake/derivedData"))
     }

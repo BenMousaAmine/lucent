@@ -9,5 +9,6 @@ import Foundation
 
 enum SidebarItem: Hashable {
     case wholeDisk
+    case trash
     case domain(Domain)
 }

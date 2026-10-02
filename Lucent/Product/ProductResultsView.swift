@@ -5,11 +5,13 @@
 //  Created by Amine ben moussa on 29/07/26.
 //
 
+import AppKit
 import SwiftUI
 
 struct ProductResultsView: View {
     let model: ProductScanViewModel
     let scanModel: ScanViewModel
+    @State private var trash = TrashViewModel()
     @State private var selectedItem: SidebarItem? = .wholeDisk
     @State private var selectedCategory: FindingCategory?
     @State private var selectedFinding: Finding?
@@ -26,11 +28,13 @@ struct ProductResultsView: View {
 
     var body: some View {
         NavigationSplitView {
-            DomainSidebar(model: model, selection: $selectedItem)
+            DomainSidebar(model: model, trash: trash, selection: $selectedItem)
         } content: {
             switch selectedItem {
             case .wholeDisk, nil:
                 WholeDiskColumn(model: scanModel)
+            case .trash:
+                TrashColumn(model: trash)
             case .domain:
                 List(categoriesForSelectedDomain, selection: $selectedCategory) { category in
                     CategorySummaryRow(category: category).tag(category)
@@ -52,10 +56,15 @@ struct ProductResultsView: View {
         .frame(minWidth: 900, minHeight: 560)
         .onAppear {
             if scanModel.phase == .intro { scanModel.start() }
+            trash.refresh()
         }
-        .onChange(of: selectedItem) { _, _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            trash.refresh()
+        }
+        .onChange(of: selectedItem) { _, item in
             selectedCategory = nil
             selectedFinding = nil
+            if item == .trash { trash.refresh() }
         }
     }
 
@@ -66,6 +75,7 @@ struct ProductResultsView: View {
         case .packageManager: return "Package manager"
         case .nodeModules: return "node_modules"
         case .orphanApp: return "Orphaned apps"
+        case .devTools: return "Developer tools"
         case .system: return "System"
         case .unknown: return "Other"
         }

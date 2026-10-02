@@ -15,16 +15,21 @@ struct ScanProgress: Sendable {
     var children: [ChildTotal]? = nil
 }
 
-struct ChildTotal: Sendable, Identifiable {
+nonisolated struct ChildTotal: Sendable, Identifiable, Codable {
     let id = UUID()
     let name: String
-    let url: URL
     let isDirectory: Bool
-    let physicalTotal: Int64
+    var physicalTotal: Int64
+    var children: [ChildTotal]? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case name, isDirectory, physicalTotal, children
+    }
 }
 
 actor DirectoryScanner {
     private let enumerator = BulkEnumerator()
+    private let retainThreshold: Int64
 
     private var filesSeen = 0
     private var physicalBytes: Int64 = 0
@@ -32,16 +37,26 @@ actor DirectoryScanner {
 
     private var countedIDs: Set<UInt64> = []
 
+    private let mountPointsOverride: Set<String>?
+    private var mountPoints: Set<String> = []
+
+    init(retainThreshold: Int64 = 10 * 1024 * 1024, mountPoints: Set<String>? = nil) {
+        self.retainThreshold = retainThreshold
+        self.mountPointsOverride = mountPoints
+    }
+
     nonisolated func scan(root: URL) -> AsyncStream<ScanProgress> {
         AsyncStream { continuation in
-            Task {
+            let task = Task {
                 await self.run(root: root, continuation: continuation)
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
     private func run(root: URL, continuation: AsyncStream<ScanProgress>.Continuation) async {
         filesSeen = 0; physicalBytes = 0; skippedPaths = 0; countedIDs = []
+        mountPoints = (mountPointsOverride ?? Self.systemMountPoints()).subtracting([root.path])
 
         let topChildren: [BulkEnumerator.Entry]
         do {
@@ -53,13 +68,8 @@ actor DirectoryScanner {
         }
 
         var childTotals: [ChildTotal] = []
-        for child in topChildren {
-            let subtotal = child.isDirectory
-                ? sumSubtree(child.node.path, continuation: continuation)
-                : accountFile(child.node)
-            childTotals.append(ChildTotal(
-                name: child.name, url: child.node.path,
-                isDirectory: child.isDirectory, physicalTotal: subtotal))
+        for child in Self.systemLast(topChildren, root: root) where !Task.isCancelled {
+            childTotals.append(measure(child, continuation: continuation))
         }
 
         let final = ScanProgress(
@@ -68,6 +78,22 @@ actor DirectoryScanner {
             children: childTotals.sorted { $0.physicalTotal > $1.physicalTotal })
         continuation.yield(final)
         continuation.finish()
+    }
+
+    private static func systemMountPoints() -> Set<String> {
+        var buffer: UnsafeMutablePointer<statfs>?
+        let count = getmntinfo(&buffer, MNT_NOWAIT)
+        guard count > 0, let buffer else { return [] }
+        return Set((0..<Int(count)).map { index in
+            withUnsafePointer(to: &buffer[index].f_mntonname) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+        })
+    }
+
+    private static func systemLast(_ entries: [BulkEnumerator.Entry], root: URL) -> [BulkEnumerator.Entry] {
+        guard root.path == "/" else { return entries }
+        return entries.filter { $0.name != "System" } + entries.filter { $0.name == "System" }
     }
 
     private func accountFile(_ node: FileNode) -> Int64 {
@@ -80,27 +106,33 @@ actor DirectoryScanner {
         return node.physicalSize
     }
 
-    private func sumSubtree(_ dir: URL, continuation: AsyncStream<ScanProgress>.Continuation) -> Int64 {
-        let entries: [BulkEnumerator.Entry]
-        do {
-            entries = try enumerator.enumerate(dir)
-        } catch {
-            skippedPaths += 1
-            return 0
+    private func measure(_ entry: BulkEnumerator.Entry, continuation: AsyncStream<ScanProgress>.Continuation) -> ChildTotal {
+        guard entry.isDirectory else {
+            return ChildTotal(name: entry.name, isDirectory: false, physicalTotal: accountFile(entry.node))
+        }
+        guard !mountPoints.contains(entry.node.path.path) else {
+            return ChildTotal(name: entry.name, isDirectory: true, physicalTotal: 0)
         }
 
-        var total: Int64 = 0
-        for entry in entries {
-            if entry.isDirectory {
-                total += sumSubtree(entry.node.path, continuation: continuation)
-            } else {
-                total += accountFile(entry.node)
-            }
+        let entries: [BulkEnumerator.Entry]
+        do {
+            entries = try enumerator.enumerate(entry.node.path)
+        } catch {
+            skippedPaths += 1
+            return ChildTotal(name: entry.name, isDirectory: true, physicalTotal: 0)
         }
+
+        var children: [ChildTotal] = []
+        for child in entries where !Task.isCancelled {
+            children.append(measure(child, continuation: continuation))
+        }
+        let total = children.reduce(0) { $0 + $1.physicalTotal }
 
         continuation.yield(ScanProgress(
             filesSeen: filesSeen, physicalBytes: physicalBytes,
-            skippedPaths: skippedPaths, currentPath: dir.path))
-        return total
+            skippedPaths: skippedPaths, currentPath: entry.node.path.path))
+        return ChildTotal(
+            name: entry.name, isDirectory: true, physicalTotal: total,
+            children: total >= retainThreshold ? children.sorted { $0.physicalTotal > $1.physicalTotal } : nil)
     }
 }

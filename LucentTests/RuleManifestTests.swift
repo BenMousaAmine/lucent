@@ -58,6 +58,8 @@ private struct ManifestFakeXcodeEnv: XcodeEnvironment {
                               physicalSize: 1_000, lastModified: nil)]
     }
     func simulatorDevices() throws -> Data { Data("{\"devices\":{}}".utf8) }
+    func simulatorRuntimes() throws -> Data { Data("{}".utf8) }
+    func simulatorRuntimeAssets() -> [SimulatorRuntimeAsset] { [] }
 }
 
 struct XcodeProbeManifestTests {

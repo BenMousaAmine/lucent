@@ -9,7 +9,8 @@ import SwiftUI
 
 struct LaunchScreen: View {
     @State private var scanModel = ProductScanViewModel()
-    @State private var wholeDiskModel = ScanViewModel()
+    @State private var wholeDiskModel = ScanViewModel(
+        cacheURL: URL.applicationSupportDirectory.appending(path: "Lucent/disk-scan.json"))
 
     var body: some View {
         Group {
@@ -20,8 +21,15 @@ struct LaunchScreen: View {
             }
         }
         .onAppear {
+            guard !Self.isRunningTests else { return }
             scanModel.scan()
         }
+    }
+
+    /// Unit tests run inside the app host: without this the launch scan starts
+    /// on the real filesystem and the test runner times out before connecting.
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
     private var introBody: some View {
